@@ -228,7 +228,7 @@ contract XenGame {
                 
                 // Calculate the maximum number of keys to purchase and the total cost
                 (uint256 maxKeysToPurchase, ) = calculateMaxKeysToPurchase(_amount);
-                    
+                require(maxKeysToPurchase > 0, "Not enough rewards to purchase any keys");
 
                 // Process users rewards for the current round
                 processRewards(_roundId);

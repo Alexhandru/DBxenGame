@@ -14,45 +14,32 @@
 */
 
 pragma solidity ^0.8.17;
-//import "forge-std/console.sol";
-
-// import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
-
-
-interface IPriceOracle {
-    function calculateAveragePrice() external view returns (uint256);
-    function calculateV2Price() external view returns (uint256);
-}
-
-interface IBurnRedeemable {
-    function onTokenBurned(address user, uint256 amount) external;
-}
-
-interface IBurnableToken {
-    function burn(address user, uint256 amount) external;
-    function transfer(address to, uint256 amount) external returns (bool);
-}
+import "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
+import "./interfaces/IWETH9Minimal.sol";
+import "./interfaces/IERC20Minimal.sol";
+import "./interfaces/ISwapRouterMinimal.sol";
 
 interface IPlayerNameRegistryBurn {
     function getPlayerNames(address playerAddress) external view returns (string[] memory);
 }
 
-contract xenBurn is IBurnRedeemable {
-    address public xenCrypto;
-    mapping(address => bool) private burnSuccessful;
+contract xenBurn {
+    address public immutable BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+    address public DXN;
+    address public DXN_WETH9_Pool = 0x7F808fD904FFA3eb6A6F259e6965Fb1466A05372;
+    address public WETH9 = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     mapping(address => uint256) public lastCall;
     mapping(address => uint256) public callCount;
     uint256 public totalCount;
     uint256 public totalXenBurned;
     uint256 public totalEthBurned;
-    address private uniswapPool = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
-    IPriceOracle private priceOracle;
+    address private swapRouter = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
     IPlayerNameRegistryBurn private playerNameRegistry;
 
-    constructor( address _xenCrypto, address _playerNameRegistry) {
-        
-        xenCrypto = _xenCrypto;
+    constructor( address _DXN, address _playerNameRegistry) {
+        DXN = _DXN;
         playerNameRegistry = IPlayerNameRegistryBurn(_playerNameRegistry);
+        IWETH9Minimal(WETH9).approve(swapRouter, type(uint256).max);
     }
 
     event TokenBurned(address indexed user, uint256 amount, string playerName);
@@ -73,7 +60,7 @@ contract xenBurn is IBurnRedeemable {
     }
 
     // Function to burn tokens by swapping ETH for the token
-    function burnXenCrypto() public isHuman gatekeeping {
+    function burnDXN() public  gatekeeping {
         require(address(this).balance > 0, "No ETH available");
 
         address player = msg.sender;
@@ -87,44 +74,28 @@ contract xenBurn is IBurnRedeemable {
         totalEthBurned += amountETH;
 
         // Get current token price from PriceOracle
-        // uint256 tokenPrice = 1; // priceOracle.calculateAveragePrice();
-        
+        uint256 amountOutExpected = _getQuote(uint128(amountETH));
 
         // // Calculate the minimum amount of tokens to purchase. Slippage set to 10% max
-        // uint256 minTokenAmount = (amountETH * tokenPrice * 90) / 100;
+        uint256 minTokenAmount = (amountOutExpected * 90) / 100;
 
-        // // Perform a Uniswap transaction to swap the ETH for tokens
-        // uint256 deadline = block.timestamp + 150; // 15 second deadline
-        // uint256[] memory amounts = IUniswapV2Router02(uniswapPool).swapExactETHForTokens{value: amountETH}(
-        //     minTokenAmount, getPathForETHtoTOKEN(), address(this), deadline
-        // );
+        IWETH9Minimal(WETH9).deposit{value: amountETH}();
 
-        // // The actual amount of tokens received from the swap is stored in amounts[1]
-        // uint256 actualTokenAmount = amounts[1];
+        uint256 actualTokenAmount = _swap(minTokenAmount, amountETH);
 
         // // Verify that the trade happened successfully
-        // require(actualTokenAmount >= minTokenAmount, "Uniswap trade failed");
+        require(actualTokenAmount >= minTokenAmount, "Uniswap trade failed");
 
         // // Update the call count and last call timestamp for the user
-        // totalCount++;
-        // callCount[player] = totalCount;
-        // lastCall[player] = block.timestamp;
+        totalCount++;
+        callCount[player] = totalCount;
+        lastCall[player] = block.timestamp;
 
-        // // Transfer the Xen to the user
-        // IBurnableToken(xenCrypto).transfer(player, actualTokenAmount);
-
-        // // Call the external contract to burn tokens
-        // IBurnableToken(xenCrypto).burn(player, actualTokenAmount);
-
-        // // Check if the burn was successful
-        // require(burnSuccessful[player], "Token burn was not successful");
-
-        // // Reset the burn successful status for the user
-        // burnSuccessful[player] = false;
+        IERC20Minimal(DXN).transferFrom(msg.sender, address(BURN_ADDRESS), actualTokenAmount);
     }
 
     // Function to calculate the expected amount of tokens to be burned based on the contract's ETH balance and token price
-    function calculateExpectedBurnAmount() public view returns (uint256) {
+    function calculateExpectedBurnAmount() public view returns (uint256 amountOutExpected) {
         // Check if the contract has ETH balance
         if (address(this).balance == 0) {
             return 0;
@@ -134,12 +105,7 @@ contract xenBurn is IBurnRedeemable {
         uint256 amountETH = address(this).balance;
 
         // Get current token price from PriceOracle
-        uint256 tokenPrice = 1; //priceOracle.calculateV2Price();
-
-        // Calculate the expected amount of tokens to be burned
-        uint256 expectedBurnAmount = (amountETH * tokenPrice);
-
-        return expectedBurnAmount;
+        amountOutExpected = _getQuote(uint128(amountETH));
     }
 
     // Function to deposit ETH into the contract
@@ -151,45 +117,25 @@ contract xenBurn is IBurnRedeemable {
     // Fallback function to receive ETH
     receive() external payable {}
 
-    // Function to get the path for swapping ETH to the token
-    function getPathForETHtoTOKEN() private view returns (address[] memory) {
-        // address[] memory path = new address[](2);
-        // path[0] = IUniswapV2Router02(uniswapPool).WETH();
-        // path[1] = xenCrypto;
-        // return path;
+    function _swap(uint256 amountOutMinimum, uint256 amountIn) private returns (uint256 amountOut) {
+        ISwapRouterMinimal.ExactInputSingleParams memory params =
+            ISwapRouterMinimal.ExactInputSingleParams({
+                tokenIn: WETH9,
+                tokenOut: DXN,
+                fee: 10000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            });
+
+        // The call to `exactInputSingle` executes the swap.
+        amountOut = ISwapRouterMinimal(swapRouter).exactInputSingle(params);
     }
 
-    // Implementation of the onTokenBurned function from the IBurnRedeemable interface
-    function onTokenBurned(address user, uint256 amount) external override {
-        require(msg.sender == address(xenCrypto), "Invalid caller");        
-
-        // Transfer 1% of the ETH balance to the user who called the function
-        uint256 amountETH = address(this).balance / 2;
-
-        // Set the burn operation as successful for the user
-        burnSuccessful[user] = true;
-        totalXenBurned += amount;
-
-        address payable senderPayable = payable(user);
-        (bool success,) = senderPayable.call{value: amountETH}("");
-        require(success, "Transfer failed.");        
-
-        // Pull player's name from the PlayerNameRegistry contract
-        string[] memory names = playerNameRegistry.getPlayerNames(user);
-
-        string memory playerName = names[0];
-
-        // Emit the TokenBurned event
-        emit TokenBurned(user, amount, playerName);
-    }
-
-    // Function to check if a user's burn operation was successful
-    function wasBurnSuccessful(address user) external view returns (bool) {
-        return burnSuccessful[user];
-    }
-
-    function supportsInterface(bytes4 interfaceId) public pure returns (bool) {
-        return
-            interfaceId == type(IBurnRedeemable).interfaceId;
+    function _getQuote(uint128 amountIn) private view returns(uint256 amountOut) {
+        (int24 tick, ) = OracleLibrary.consult(DXN_WETH9_Pool, 1);
+        amountOut = OracleLibrary.getQuoteAtTick(tick, amountIn, WETH9, DXN);
     }
 }

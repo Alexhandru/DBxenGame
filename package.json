@@ -1,0 +1,6 @@
+{
+    "dependencies": {
+      "@openzeppelin/contracts": "^4.9.1",
+      "@uniswap/v3-periphery": "^1.4.4"
+    }
+  }
