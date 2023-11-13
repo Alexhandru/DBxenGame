@@ -9,6 +9,7 @@ import "../src/xenBurn.sol";
 import "../src/PlayerNameRegistry.sol";
 import "../src/DBXenGame.sol";
 import "../src/interfaces/IERC721Minimal.sol";
+import "../src/interfaces/IWETH9Minimal.sol";
 
 contract DBXenBurnTest is Test {
     xenBurn public XenBurnInstance;
@@ -68,15 +69,18 @@ contract DBXenBurnTest is Test {
                 fail("Low level error on registering name");
         }
 
-        try XenBurnInstance.burnDXN() {
-            console.log("Burn operation successful.");
-        } catch Error(string memory reason) {
-            console.log("Error encountered:", reason);
-        } catch (bytes memory ) /*lowLevelData*/ {
-            console.log("Low level error");
-        }
+        vm.recordLogs();
+
+        uint256 expectedOut = _getQuote(1 ether);
+        uint256 minExpectedOut = (90 * expectedOut) / 100;
+
+        XenBurnInstance.burnDXN();
 
         vm.stopPrank();
+
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        assertEq(entries[3].topics[0], keccak256("Swap(address,address,int256,int256,uint160,uint128,int24)"));
+        //assertGe(int256(entries[3].topics[4]), int256(minExpectedOut));
     }
 
     function _getQuote(uint128 amountIn) public view returns(uint256 amountOut) {

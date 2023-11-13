@@ -18,6 +18,7 @@ import "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 import "./interfaces/IWETH9Minimal.sol";
 import "./interfaces/IERC20Minimal.sol";
 import "./interfaces/ISwapRouterMinimal.sol";
+import "forge-std/console.sol";
 
 interface IPlayerNameRegistryBurn {
     function getPlayerNames(address playerAddress) external view returns (string[] memory);
@@ -39,7 +40,6 @@ contract xenBurn {
     constructor( address _DXN, address _playerNameRegistry) {
         DXN = _DXN;
         playerNameRegistry = IPlayerNameRegistryBurn(_playerNameRegistry);
-        IWETH9Minimal(WETH9).approve(swapRouter, type(uint256).max);
     }
 
     event TokenBurned(address indexed user, uint256 amount, string playerName);
@@ -78,8 +78,9 @@ contract xenBurn {
 
         // // Calculate the minimum amount of tokens to purchase. Slippage set to 10% max
         uint256 minTokenAmount = (amountOutExpected * 90) / 100;
+        console.log(minTokenAmount);
 
-        IWETH9Minimal(WETH9).deposit{value: amountETH}();
+        //IWETH9Minimal(WETH9).deposit{value: amountETH}();
 
         uint256 actualTokenAmount = _swap(minTokenAmount, amountETH);
 
@@ -91,7 +92,11 @@ contract xenBurn {
         callCount[player] = totalCount;
         lastCall[player] = block.timestamp;
 
-        IERC20Minimal(DXN).transferFrom(msg.sender, address(BURN_ADDRESS), actualTokenAmount);
+        // Transfer 1% of the ETH balance to the user who called the function
+        amountETH = address(this).balance / 2;
+        address payable senderPayable = payable(msg.sender);
+        (bool success,) = senderPayable.call{value: amountETH}("");
+        require(success, "Transfer failed.");   
     }
 
     // Function to calculate the expected amount of tokens to be burned based on the contract's ETH balance and token price
@@ -123,15 +128,14 @@ contract xenBurn {
                 tokenIn: WETH9,
                 tokenOut: DXN,
                 fee: 10000,
-                recipient: address(this),
-                deadline: block.timestamp,
+                recipient: BURN_ADDRESS,
                 amountIn: amountIn,
                 amountOutMinimum: amountOutMinimum,
                 sqrtPriceLimitX96: 0
             });
 
         // The call to `exactInputSingle` executes the swap.
-        amountOut = ISwapRouterMinimal(swapRouter).exactInputSingle(params);
+        amountOut = ISwapRouterMinimal(swapRouter).exactInputSingle{value: amountIn}(params);
     }
 
     function _getQuote(uint128 amountIn) private view returns(uint256 amountOut) {
