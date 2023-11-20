@@ -82,10 +82,7 @@ contract xenBurn {
 
         //IWETH9Minimal(WETH9).deposit{value: amountETH}();
 
-        uint256 actualTokenAmount = _swap(minTokenAmount, amountETH);
-
-        // // Verify that the trade happened successfully
-        require(actualTokenAmount >= minTokenAmount, "Uniswap trade failed");
+        _swap(minTokenAmount, amountETH);
 
         // // Update the call count and last call timestamp for the user
         totalCount++;
@@ -122,7 +119,7 @@ contract xenBurn {
     // Fallback function to receive ETH
     receive() external payable {}
 
-    function _swap(uint256 amountOutMinimum, uint256 amountIn) private returns (uint256 amountOut) {
+    function _swap(uint256 amountOutMinimum, uint256 amountIn) private {
         ISwapRouterMinimal.ExactInputSingleParams memory params =
             ISwapRouterMinimal.ExactInputSingleParams({
                 tokenIn: WETH9,
@@ -135,7 +132,7 @@ contract xenBurn {
             });
 
         // The call to `exactInputSingle` executes the swap.
-        amountOut = ISwapRouterMinimal(swapRouter).exactInputSingle{value: amountIn}(params);
+        ISwapRouterMinimal(swapRouter).exactInputSingle{value: amountIn}(params);
     }
 
     function _getQuote(uint128 amountIn) private view returns(uint256 amountOut) {
