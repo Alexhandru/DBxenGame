@@ -18,7 +18,6 @@ import "@uniswap/v3-periphery/contracts/libraries/OracleLibrary.sol";
 import "./interfaces/IWETH9Minimal.sol";
 import "./interfaces/IERC20Minimal.sol";
 import "./interfaces/ISwapRouterMinimal.sol";
-import "forge-std/console.sol";
 
 interface IPlayerNameRegistryBurn {
     function getPlayerNames(address playerAddress) external view returns (string[] memory);
@@ -60,8 +59,8 @@ contract xenBurn {
     }
 
     // Function to burn tokens by swapping ETH for the token
-    function burnDXN() public  gatekeeping {
-        require(address(this).balance > 0, "No ETH available");
+    function burnDXN() public isHuman gatekeeping {
+        require(address(this).balance > 2, "No ETH available");
 
         address player = msg.sender;
 
@@ -78,9 +77,7 @@ contract xenBurn {
 
         // // Calculate the minimum amount of tokens to purchase. Slippage set to 10% max
         uint256 minTokenAmount = (amountOutExpected * 90) / 100;
-        console.log(minTokenAmount);
-
-        //IWETH9Minimal(WETH9).deposit{value: amountETH}();
+        require(minTokenAmount > 0, "Min. token amount can't be zero");
 
         _swap(minTokenAmount, amountETH);
 
